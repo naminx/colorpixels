@@ -1,0 +1,53 @@
+{
+  description = "Tell the ratio of color pixels / total pixels";
+
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs";
+
+  outputs = { self, nixpkgs }:
+    let
+      system = "x86_64-linux";
+      pkgs = import nixpkgs { inherit system; };
+
+      stb = pkgs.fetchFromGitHub {
+        owner = "nothings";
+        repo = "stb";
+        rev = "f0569113c93ad095470c54bf34a17b36646bbbb5";
+        sha256 = "sha256-FkTeRO/AC5itykH4uWNsE0UeQTS34VtGGoej5QJiBlg=";
+      };
+    in
+    {
+      packages.${system}.default = pkgs.stdenv.mkDerivation {
+        pname = "colorpixels";
+        version = "1.0";
+        src = ./.;
+
+        nativeBuildInputs = with pkgs; [ gcc cli11 ];
+        buildInputs = with pkgs; [ libavif libwebp ];
+
+        preBuild = ''
+          mkdir -p include
+          ln -sf ${stb}/stb_image.h include/
+        '';
+
+        buildPhase = ''
+          runHook preBuild
+          ${pkgs.gcc}/bin/g++ -std=c++20 -O2 -Wall -Wextra \
+            -Iinclude \
+            -I${pkgs.libavif}/include -I${pkgs.libwebp}/include -I${pkgs.cli11}/include \
+            colorpixels.cc -o colorpixels \
+            -L${pkgs.libavif.out}/lib -L${pkgs.libwebp.out}/lib \
+            -lavif -lwebp -lm
+          runHook postBuild
+        '';
+
+        installPhase = ''
+          mkdir -p $out/bin
+          cp colorpixels $out/bin/
+        '';
+      };
+
+      devShells.${system}.default = pkgs.mkShell {
+        packages = with pkgs; [ gcc libavif libwebp cli11 stb ];
+      };
+    };
+}
