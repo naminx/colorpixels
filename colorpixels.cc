@@ -16,44 +16,20 @@
 #include <cstdint>
 #include <cstring>
 
-constexpr double default_threshold = 11.0;
-
-double sRGB_to_linear(double c) {
-    return (c <= 0.04045) ? (c / 12.92) : std::pow((c + 0.055) / 1.055, 2.4);
-}
-
-double computeLCHChromaSquare(unsigned char r, unsigned char g, unsigned char b) {
-    double R = sRGB_to_linear(r / 255.0);
-    double G = sRGB_to_linear(g / 255.0);
-    double B = sRGB_to_linear(b / 255.0);
-
-    double X = R*0.4124564 + G*0.3575761 + B*0.1804375;
-    double Y = R*0.2126729 + G*0.7151522 + B*0.0721750;
-    double Z = R*0.0193339 + G*0.1191920 + B*0.9503041;
-
-    constexpr double Xn = 0.95047, Yn = 1.0, Zn = 1.08883;
-    X /= Xn; Y /= Yn; Z /= Zn;
-
-    auto f = [](double t) { return (t > 0.008856) ? std::cbrt(t) : (7.787 * t + 16.0 / 116.0); };
-    double fx = f(X), fy = f(Y), fz = f(Z);
-
-    double a = 500.0 * (fx - fy);
-    double b2 = 200.0 * (fy - fz);
-    return a*a + b2*b2;
-}
-
-bool isAboveThreshold(unsigned char r, unsigned char g, unsigned char b)
+inline bool isAboveThreshold(unsigned char r, unsigned char g, unsigned char b)
 {
-    int sum = r + g + b;
-    int diffSum = abs((int)r - (int)g) + abs((int)g - (int)b) + abs((int)b - (int)r);
+    int sum = (int)r + (int)g + (int)b;
+
+    int diffSum = abs(r-g) + abs(g-b) + abs(b-r);
 
     int threshold;
-    if (sum < 240)
-        threshold = 45;
-    else if (sum < 390)
-        threshold = 50;
-    else
-        threshold = 55;
+    if (sum < 240)           threshold = 45;    // dark, strict
+    else if (sum < 280)      threshold = 50;
+    else if (sum < 336)      threshold = 55;
+    else if (sum < 390)      threshold = 60;
+    else if (sum < 440)      threshold = 65;
+    else if (sum < 500)      threshold = 70;
+    else                     threshold = 75;    // very bright, lenient
 
     return diffSum > threshold;
 }
@@ -170,10 +146,8 @@ int main(int argc, char *argv[]) {
     CLI::App app{"LCh chroma detector"};
 
     std::vector<std::string> filenames;
-    // double threshold = default_threshold;
 
     app.add_option("files", filenames, "Image filename(s)")->required();
-    // app.add_option("-t,--threshold", threshold, "Chroma threshold (default 11)");
 
     CLI11_PARSE(app, argc, argv);
 
@@ -210,13 +184,10 @@ int main(int argc, char *argv[]) {
         std::size_t total_pixels = static_cast<size_t>(width) * height;
         std::size_t count = 0;
 
-        // const double thresholdSquare = threshold*threshold;
         for(std::size_t i = 0; i < total_pixels; ++i) {
             unsigned char r = pixels[3*i + 0];
             unsigned char g = pixels[3*i + 1];
             unsigned char b = pixels[3*i + 2];
-            // double chroma = computeLCHChromaSquare(r, g, b);
-            // if(chroma > thresholdSquare) ++count;
             if (isAboveThreshold(r, b, g)) ++count;
         }
 
