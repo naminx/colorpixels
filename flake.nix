@@ -47,7 +47,16 @@
       };
 
       devShells.${system}.default = pkgs.mkShell {
-        packages = with pkgs; [ gcc libavif libwebp cli11 stb ];
+        packages = with pkgs; [ gcc libavif libwebp cli11 ] ++ [ stb ];
+
+        # Also create stb_image.h symlink for dev shell use:
+        shellHook = ''
+          mkdir -p include
+          ln -sf ${stb}/stb_image.h include/
+
+          export CPPFLAGS="$CPPFLAGS -Iinclude -I${pkgs.libavif}/include -I${pkgs.libwebp}/include -I${pkgs.cli11}/include"
+          export LDFLAGS="$LDFLAGS -L${pkgs.libavif.out}/lib -L${pkgs.libwebp.out}/lib"
+        '';
       };
     };
 }

@@ -22,7 +22,7 @@ double sRGB_to_linear(double c) {
     return (c <= 0.04045) ? (c / 12.92) : std::pow((c + 0.055) / 1.055, 2.4);
 }
 
-double computeLCHChroma(unsigned char r, unsigned char g, unsigned char b) {
+double computeLCHChromaSquare(unsigned char r, unsigned char g, unsigned char b) {
     double R = sRGB_to_linear(r / 255.0);
     double G = sRGB_to_linear(g / 255.0);
     double B = sRGB_to_linear(b / 255.0);
@@ -39,7 +39,23 @@ double computeLCHChroma(unsigned char r, unsigned char g, unsigned char b) {
 
     double a = 500.0 * (fx - fy);
     double b2 = 200.0 * (fy - fz);
-    return std::sqrt(a*a + b2*b2);
+    return a*a + b2*b2;
+}
+
+bool isAboveThreshold(unsigned char r, unsigned char g, unsigned char b)
+{
+    int sum = r + g + b;
+    int diffSum = abs((int)r - (int)g) + abs((int)g - (int)b) + abs((int)b - (int)r);
+
+    int threshold;
+    if (sum < 240)
+        threshold = 45;
+    else if (sum < 390)
+        threshold = 50;
+    else
+        threshold = 55;
+
+    return diffSum > threshold;
 }
 
 enum class FileType { AVIF, WebP, Other, Unknown };
@@ -154,10 +170,10 @@ int main(int argc, char *argv[]) {
     CLI::App app{"LCh chroma detector"};
 
     std::vector<std::string> filenames;
-    double threshold = default_threshold;
+    // double threshold = default_threshold;
 
     app.add_option("files", filenames, "Image filename(s)")->required();
-    app.add_option("-t,--threshold", threshold, "Chroma threshold (default 11)");
+    // app.add_option("-t,--threshold", threshold, "Chroma threshold (default 11)");
 
     CLI11_PARSE(app, argc, argv);
 
@@ -194,12 +210,14 @@ int main(int argc, char *argv[]) {
         std::size_t total_pixels = static_cast<size_t>(width) * height;
         std::size_t count = 0;
 
+        // const double thresholdSquare = threshold*threshold;
         for(std::size_t i = 0; i < total_pixels; ++i) {
             unsigned char r = pixels[3*i + 0];
             unsigned char g = pixels[3*i + 1];
             unsigned char b = pixels[3*i + 2];
-            double chroma = computeLCHChroma(r, g, b);
-            if(chroma > threshold) ++count;
+            // double chroma = computeLCHChromaSquare(r, g, b);
+            // if(chroma > thresholdSquare) ++count;
+            if (isAboveThreshold(r, b, g)) ++count;
         }
 
         std::cout << std::format("{:.6f}\n", static_cast<double>(count)/total_pixels);
