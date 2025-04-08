@@ -1,6 +1,8 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
+#include "coarse_lut.h"
+
 #include <avif/avif.h>
 #include <webp/decode.h>
 
@@ -16,22 +18,11 @@
 #include <cstdint>
 #include <cstring>
 
-inline bool isAboveThreshold(unsigned char r, unsigned char g, unsigned char b)
+inline bool isAlmostGray(uint8_t r, uint8_t g, uint8_t b)
 {
-    int sum = (int)r + (int)g + (int)b;
-
-    int diffSum = abs(r-g) + abs(g-b) + abs(b-r);
-
-    int threshold;
-    if (sum < 240)           threshold = 45;    // dark, strict
-    else if (sum < 280)      threshold = 50;
-    else if (sum < 336)      threshold = 55;
-    else if (sum < 390)      threshold = 60;
-    else if (sum < 440)      threshold = 65;
-    else if (sum < 500)      threshold = 70;
-    else                     threshold = 75;    // very bright, lenient
-
-    return diffSum > threshold;
+    uint8_t lo = minB_coarse[r>>2][g>>2];
+    uint8_t hi = maxB_coarse[r>>2][g>>2];
+    return (lo <= b) && (b <= hi);
 }
 
 enum class FileType { AVIF, WebP, Other, Unknown };
@@ -188,7 +179,7 @@ int main(int argc, char *argv[]) {
             unsigned char r = pixels[3*i + 0];
             unsigned char g = pixels[3*i + 1];
             unsigned char b = pixels[3*i + 2];
-            if (isAboveThreshold(r, b, g)) ++count;
+            if (!isAlmostGray(r, b, g)) ++count;
         }
 
         std::cout << std::format("{:.6f}\n", static_cast<double>(count)/total_pixels);

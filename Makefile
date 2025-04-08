@@ -2,7 +2,7 @@ CXX = g++
 CXXFLAGS = -std=c++20 -O2 -Wall -Wextra $(CPPFLAGS)
 LIBS = $(LDFLAGS) -lavif -lwebp -lm
 TARGET = colorpixels
-SRCS = colorpixels.cc
+SRCS = colorpixels.cc coarse_lut.h
 .PHONY: all clean
 
 all: $(TARGET)
