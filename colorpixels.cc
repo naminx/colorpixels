@@ -1,7 +1,8 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
-#include "coarse_lut.h"
+#include "chroma5.h"
+#include "chroma13.h"
 
 #include <avif/avif.h>
 #include <webp/decode.h>
@@ -18,11 +19,20 @@
 #include <cstdint>
 #include <cstring>
 
-inline bool isAlmostGray(uint8_t r, uint8_t g, uint8_t b)
+inline bool is_gray_chroma5(uint8_t r, uint8_t g, uint8_t b)
 {
-    uint8_t lo = minB_coarse[r>>2][g>>2];
-    uint8_t hi = maxB_coarse[r>>2][g>>2];
-    return (lo <= b) && (b <= hi);
+    uint16_t packed = b_chroma5[r >> 2][g >> 2];
+    uint8_t minB = packed >> 8;
+    uint8_t maxB = packed & 0xFF;
+    return (minB <= b) && (b <= maxB);
+}
+
+inline bool is_gray_chroma13(uint8_t r, uint8_t g, uint8_t b)
+{
+    uint16_t packed = b_chroma13[r >> 2][g >> 2];
+    uint8_t minB = packed >> 8;
+    uint8_t maxB = packed & 0xFF;
+    return (minB <= b) && (b <= maxB);
 }
 
 enum class FileType { AVIF, WebP, Other, Unknown };
@@ -137,8 +147,14 @@ int main(int argc, char *argv[]) {
     CLI::App app{"LCh chroma detector"};
 
     std::vector<std::string> filenames;
+    bool accept_sepia = false;
 
+    // filenames positional argument(s), required
     app.add_option("files", filenames, "Image filename(s)")->required();
+
+    // sepia wider chroma tolerance toggle
+    app.add_flag("-s,--sepia", accept_sepia,
+                 "Use wider chroma threshold (~13) to consider sepia/off-white tones as gray");
 
     CLI11_PARSE(app, argc, argv);
 
@@ -179,7 +195,10 @@ int main(int argc, char *argv[]) {
             unsigned char r = pixels[3*i + 0];
             unsigned char g = pixels[3*i + 1];
             unsigned char b = pixels[3*i + 2];
-            if (!isAlmostGray(r, b, g)) ++count;
+            bool is_gray = accept_sepia
+                ? is_gray_chroma13(r,g,b)
+                : is_gray_chroma5(r,g,b);
+            if (!is_gray) ++count;
         }
 
         std::cout << std::format("{:.6f}\n", static_cast<double>(count)/total_pixels);

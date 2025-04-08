@@ -3,7 +3,8 @@
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs";
 
-  outputs = { self, nixpkgs }:
+  outputs =
+    { self, nixpkgs }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
@@ -21,8 +22,14 @@
         version = "1.0";
         src = ./.;
 
-        nativeBuildInputs = with pkgs; [ gcc cli11 ];
-        buildInputs = with pkgs; [ libavif libwebp ];
+        nativeBuildInputs = with pkgs; [
+          gcc
+          cli11
+        ];
+        buildInputs = with pkgs; [
+          libavif
+          libwebp
+        ];
 
         preBuild = ''
           mkdir -p include
@@ -47,7 +54,23 @@
       };
 
       devShells.${system}.default = pkgs.mkShell {
-        packages = with pkgs; [ gcc libavif libwebp cli11 ] ++ [ stb ];
+        packages =
+          (
+            with pkgs;
+            [
+              gcc
+              libavif
+              libwebp
+              cli11
+            ]
+            ++ (with python3Packages; [
+              scikit-image
+              tqdm
+              scikit-learn
+              pillow
+            ])
+          )
+          ++ [ stb ];
 
         # Also create stb_image.h symlink for dev shell use:
         shellHook = ''
