@@ -6,17 +6,22 @@
 #include <avif/avif.h>
 #include <webp/decode.h>
 
+#include <atomic>
 #include <CLI/CLI.hpp>
-#include <iostream>
-#include <fstream>
-#include <string_view>
-#include <vector>
-#include <memory>
 #include <cmath>
-#include <format>
-#include <span>
 #include <cstdint>
 #include <cstring>
+#include <format>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <span>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <vector>
 
 enum class FileType { AVIF, WebP, Other, Unknown };
 
@@ -155,105 +160,151 @@ inline float computeChroma(uint8_t r, uint8_t g, uint8_t b) {
     return std::sqrt(a * a + b2 * b2);
 }
 
-int main(int argc, char *argv[]) {
+constexpr int BLOCKS = 64;
+constexpr int BLOCKSIZE = 4;
+
+struct OutputEntry {
+    std::string text;
+    std::atomic<bool> ready{false};  // published flag
+};
+
+inline std::string shell_escape(const std::string& name) {
+    std::string out;
+    out.reserve(name.size()+2);
+    out.push_back('\'');
+    for (char c : name) {
+        if (c == '\'')
+            out += "'\\''";   // end quote, escaped quote, reopen quote
+        else
+            out.push_back(c);
+    }
+    out.push_back('\'');
+    return out;
+}
+
+int main(int argc, char* argv[]) {
     CLI::App app{"LCh chroma detector"};
 
     std::vector<std::string> filenames;
     float chroma_threshold = 5.0f;
     bool accept_sepia = false;
+    bool print_filename = false;
 
-    // filenames positional argument(s), required
     app.add_option("files", filenames, "Image filename(s)")->required();
-
-    app.add_option("-c,--chroma", chroma_threshold,
-        "Set chroma threshold for gray detection")->check(CLI::PositiveNumber);
-
-    app.add_flag("-s,--sepia", accept_sepia,
-        "Use wider chroma threshold (~13) to consider sepia/off-white tones as gray");
+    app.add_option("-c,--chroma", chroma_threshold, "Set chroma threshold for gray detection")->check(CLI::PositiveNumber);
+    app.add_flag("-s,--sepia", accept_sepia, "Use wider chroma threshold (~13)");
+    app.add_flag("-p,--print-filename", print_filename, "Print filename before ratio");
 
     CLI11_PARSE(app, argc, argv);
-    if (accept_sepia) {
-        chroma_threshold = 13.0f;
-    }
+    if(accept_sepia) chroma_threshold = 13.0f;
 
-    constexpr int BLOCKS = 64;
-    constexpr int BLOCKSIZE = 4;
-    uint16_t gray_range_LUT[BLOCKS][BLOCKS] = {};
-
+    // ------------ build LUT once ----------------
+    static uint16_t gray_range_LUT[BLOCKS][BLOCKS]{};
     for (int Rb = 0; Rb < BLOCKS; ++Rb)
-    for (int Gb = 0; Gb < BLOCKS; ++Gb)
-    {
+    for (int Gb = 0; Gb < BLOCKS; ++Gb) {
         int rmin = Rb * BLOCKSIZE, rmax = rmin + BLOCKSIZE - 1;
         int gmin = Gb * BLOCKSIZE, gmax = gmin + BLOCKSIZE - 1;
-        uint8_t minB = 255, maxB = 0;
-    
+        uint8_t minB=255, maxB=0;
         for (int r = rmin; r <= rmax; ++r)
         for (int g = gmin; g <= gmax; ++g)
-        for (int b = 0; b < 256; ++b)
-        {
+        for (int b = 0; b < 256; ++b) {
             float chroma = computeChroma(uint8_t(r), uint8_t(g), uint8_t(b));
-            if (chroma < chroma_threshold) {
-                if (b < minB) minB = b;
-                if (b > maxB) maxB = b;
+            if(chroma < chroma_threshold) {
+                if(b < minB) minB = b;
+                if(b > maxB) maxB = b;
             }
         }
-        gray_range_LUT[Rb][Gb] = (uint16_t(minB) << 8) | maxB;
+        gray_range_LUT[Rb][Gb] = (uint16_t(minB)<<8) | maxB;
     }
 
-    for(const auto& filename : filenames) {
-        std::ifstream file(filename, std::ios::binary);
-        if (!file) {
-            std::cerr << "Failed to open file '" << filename << "'\n";
-            continue;
-        }
-        std::vector<uint8_t> header(4096);
-        file.read(reinterpret_cast<char*>(header.data()), header.size());
-        header.resize(file.gcount());
+    // --------- output storage and threads -----------
+    std::vector<OutputEntry> outputs(filenames.size());
+    std::vector<std::thread> threads;
 
-        FileType ftype = detect_file_type(header);
+    for(size_t idx=0; idx < filenames.size(); ++idx) {
+        threads.emplace_back([&, idx]() {
+            const std::string& filename = filenames[idx];
+            std::stringstream ss;
 
-        int width=0, height=0, channels=0;
-        unsigned char *pixels = nullptr;
-        bool ok = false;
+            std::ifstream file(filename, std::ios::binary);
+            if (!file) {
+                ss << "Failed_to_open ";
+                if (print_filename) ss << shell_escape(filename);
+                ss << "\n";
+                outputs[idx].text = ss.str();
+                outputs[idx].ready.store(true, std::memory_order_release);
+                return;
+            }
 
-        if(ftype == FileType::AVIF) {
-            ok = decode_avif(filename, pixels, width, height);
-        } else if(ftype == FileType::WebP) {
-            ok = decode_webp(filename, pixels, width, height);
-        } else {
-            pixels = stbi_load(filename.c_str(), &width, &height, &channels, 3);
-            ok = (pixels != nullptr);
-        }
+            std::vector<uint8_t> header(4096);
+            file.read(reinterpret_cast<char*>(header.data()), header.size());
+            header.resize(file.gcount());
 
-        if (!ok) {
-            std::cerr << "Failed to decode image '" << filename << "'\n";
-            continue;
-        }
+            FileType ftype = detect_file_type(header);
 
-        std::size_t total_pixels = static_cast<size_t>(width) * height;
-        std::size_t count = 0;
+            int width=0, height=0, channels=0;
+            unsigned char* pixels = nullptr;
+            bool ok = false;
 
-        for(std::size_t i = 0; i < total_pixels; ++i) {
-            unsigned char r = pixels[3*i + 0];
-            unsigned char g = pixels[3*i + 1];
-            unsigned char b = pixels[3*i + 2];
+            if(ftype == FileType::AVIF)
+                ok = decode_avif(filename, pixels, width, height);
+            else if(ftype == FileType::WebP)
+                ok = decode_webp(filename, pixels, width, height);
+            else {
+                pixels = stbi_load(filename.c_str(), &width, &height, &channels, 3);
+                ok = pixels != nullptr;
+            }
 
-            // 6-bit block indices
-            int Rb = r >> 2;
-            int Gb = g >> 2;
-            uint16_t packed = gray_range_LUT[Rb][Gb];
-            uint8_t minB = packed >> 8;
-            uint8_t maxB = packed & 0xFF;
+            if(!ok) {
+                ss << "Failed_to_decode ";
+                if (print_filename) ss << shell_escape(filename);
+                ss << "\n";
+                outputs[idx].text = ss.str();
+                outputs[idx].ready.store(true, std::memory_order_release);
+                return;
+            }
 
-            bool is_gray = (minB <= b && b <= maxB);
+            std::size_t total_pixels = std::size_t(width) * height;
+            std::size_t count = 0;
 
-            if (!is_gray) ++count;
-        }
+            for(std::size_t i = 0; i < total_pixels; ++i){
+                uint8_t r = pixels[3*i+0];
+                uint8_t g = pixels[3*i+1];
+                uint8_t b = pixels[3*i+2];
 
-        std::cout << std::format("{:.6f}\n", static_cast<float>(count)/total_pixels);
+                int Rb = r >> 2;
+                int Gb = g >> 2;
+                auto packed = gray_range_LUT[Rb][Gb];
+                uint8_t minB = packed >> 8;
+                uint8_t maxB = packed & 0xFF;
 
-        stbi_image_free(pixels);
+                bool is_gray = (minB <= b && b <= maxB);
+                if(!is_gray) ++count;
+            }
+
+            stbi_image_free(pixels);
+
+            float ratio = static_cast<float>(count)/total_pixels;
+            if (print_filename) {
+                ss << shell_escape(filename) << ' ' << std::format("{:.6f}\n", ratio);
+            } else {
+                ss << std::format("{:.6f}\n", ratio);
+            }
+
+            outputs[idx].text = ss.str();
+            outputs[idx].ready.store(true, std::memory_order_release);
+        });
     }
+
+    // -------- print outputs as soon as available sequentially ------
+    for(size_t next = 0; next < outputs.size(); ++next) {
+        // spin/wait until ready
+        while(!outputs[next].ready.load(std::memory_order_acquire))
+            std::this_thread::yield();
+        std::cout << outputs[next].text;
+    }
+
+    for(auto& t : threads) t.join();
 
     return 0;
 }
