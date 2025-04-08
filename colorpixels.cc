@@ -1,8 +1,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
-#include "chroma5.h"
-#include "chroma13.h"
+#include "common.h"
 
 #include <avif/avif.h>
 #include <webp/decode.h>
@@ -18,22 +17,6 @@
 #include <span>
 #include <cstdint>
 #include <cstring>
-
-inline bool is_gray_chroma5(uint8_t r, uint8_t g, uint8_t b)
-{
-    uint16_t packed = b_chroma5[r >> 2][g >> 2];
-    uint8_t minB = packed >> 8;
-    uint8_t maxB = packed & 0xFF;
-    return (minB <= b) && (b <= maxB);
-}
-
-inline bool is_gray_chroma13(uint8_t r, uint8_t g, uint8_t b)
-{
-    uint16_t packed = b_chroma13[r >> 2][g >> 2];
-    uint8_t minB = packed >> 8;
-    uint8_t maxB = packed & 0xFF;
-    return (minB <= b) && (b <= maxB);
-}
 
 enum class FileType { AVIF, WebP, Other, Unknown };
 
@@ -143,20 +126,79 @@ bool decode_webp(std::string_view filename, unsigned char*& pixels, int& width, 
     return true;
 }
 
+// Precompute reciprocals for faster reciprocal multiplication
+constexpr float inv_1p5 = 1.0f / 1.5f;
+constexpr float inv_Xn = 1.0f / 0.95047f;   // D65 Xn
+constexpr float inv_Yn = 1.0f / 1.0f;       // D65 Yn, =1.0, so fine
+constexpr float inv_Zn = 1.0f / 1.08883f;   // D65 Zn
+
+/// Lookup/interpolate f_xyz without pow
+inline float f_xyz(float v) {
+    int idx = std::clamp(
+        int(v * inv_1p5 * (FSIZE - 1) + 0.5f), 0, FSIZE - 1);
+    return f_table[idx];
+}
+
+/// Compute chroma given 8-bit srgb inputs, with all float math
+inline float computeChroma(uint8_t r, uint8_t g, uint8_t b) {
+    float X = R_X[r] + G_X[g] + B_X[b];
+    float Y = R_Y[r] + G_Y[g] + B_Y[b];
+    float Z = R_Z[r] + G_Z[g] + B_Z[b];
+
+    float fx = f_xyz(X * inv_Xn);
+    float fy = f_xyz(Y * inv_Yn);   // or just `Y`
+    float fz = f_xyz(Z * inv_Zn);
+
+    float a = 500.0f * (fx - fy);
+    float b2 = 200.0f * (fy - fz);
+
+    return std::sqrt(a * a + b2 * b2);
+}
+
 int main(int argc, char *argv[]) {
     CLI::App app{"LCh chroma detector"};
 
     std::vector<std::string> filenames;
+    float chroma_threshold = 5.0f;
     bool accept_sepia = false;
 
     // filenames positional argument(s), required
     app.add_option("files", filenames, "Image filename(s)")->required();
 
-    // sepia wider chroma tolerance toggle
+    app.add_option("-c,--chroma", chroma_threshold,
+        "Set chroma threshold for gray detection")->check(CLI::PositiveNumber);
+
     app.add_flag("-s,--sepia", accept_sepia,
-                 "Use wider chroma threshold (~13) to consider sepia/off-white tones as gray");
+        "Use wider chroma threshold (~13) to consider sepia/off-white tones as gray");
 
     CLI11_PARSE(app, argc, argv);
+    if (accept_sepia) {
+        chroma_threshold = 13.0f;
+    }
+
+    constexpr int BLOCKS = 64;
+    constexpr int BLOCKSIZE = 4;
+    uint16_t gray_range_LUT[BLOCKS][BLOCKS] = {};
+
+    for (int Rb = 0; Rb < BLOCKS; ++Rb)
+    for (int Gb = 0; Gb < BLOCKS; ++Gb)
+    {
+        int rmin = Rb * BLOCKSIZE, rmax = rmin + BLOCKSIZE - 1;
+        int gmin = Gb * BLOCKSIZE, gmax = gmin + BLOCKSIZE - 1;
+        uint8_t minB = 255, maxB = 0;
+    
+        for (int r = rmin; r <= rmax; ++r)
+        for (int g = gmin; g <= gmax; ++g)
+        for (int b = 0; b < 256; ++b)
+        {
+            float chroma = computeChroma(uint8_t(r), uint8_t(g), uint8_t(b));
+            if (chroma < chroma_threshold) {
+                if (b < minB) minB = b;
+                if (b > maxB) maxB = b;
+            }
+        }
+        gray_range_LUT[Rb][Gb] = (uint16_t(minB) << 8) | maxB;
+    }
 
     for(const auto& filename : filenames) {
         std::ifstream file(filename, std::ios::binary);
@@ -195,13 +237,20 @@ int main(int argc, char *argv[]) {
             unsigned char r = pixels[3*i + 0];
             unsigned char g = pixels[3*i + 1];
             unsigned char b = pixels[3*i + 2];
-            bool is_gray = accept_sepia
-                ? is_gray_chroma13(r,g,b)
-                : is_gray_chroma5(r,g,b);
+
+            // 6-bit block indices
+            int Rb = r >> 2;
+            int Gb = g >> 2;
+            uint16_t packed = gray_range_LUT[Rb][Gb];
+            uint8_t minB = packed >> 8;
+            uint8_t maxB = packed & 0xFF;
+
+            bool is_gray = (minB <= b && b <= maxB);
+
             if (!is_gray) ++count;
         }
 
-        std::cout << std::format("{:.6f}\n", static_cast<double>(count)/total_pixels);
+        std::cout << std::format("{:.6f}\n", static_cast<float>(count)/total_pixels);
 
         stbi_image_free(pixels);
     }

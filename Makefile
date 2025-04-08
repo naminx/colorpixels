@@ -1,14 +1,31 @@
 CXX = g++
+CC  = gcc
 CXXFLAGS = -std=c++20 -O2 -Wall -Wextra $(CPPFLAGS)
+CFLAGS   = -O2 -Wall -Wextra $(CPPFLAGS)
 LIBS = $(LDFLAGS) -lavif -lwebp -lm
 TARGET = colorpixels
+
 SRCS = colorpixels.cc
+OBJS = $(SRCS:.cc=.o)
+
 .PHONY: all clean
 
 all: $(TARGET)
 
-$(TARGET): include/stb_image.h $(SRCS)
-	$(CXX) $(CXXFLAGS) $(SRCS) -o $@ $(LIBS)
+# build target from objects
+$(TARGET): $(OBJS)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LIBS)
+
+# explicit dependency
+colorpixels.o: include/stb_image.h common.h
+
+# compile C++ source files
+%.o: %.cc
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+# compile C source files
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
 include/stb_image.h:
 	mkdir -p include
@@ -19,4 +36,4 @@ include/stb_image.h:
 	ln -sf stb/stb_image.h include/
 
 clean:
-	rm -rf $(TARGET)
+	rm -f $(TARGET) *.o
