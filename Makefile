@@ -1,25 +1,26 @@
 CXX = g++
-CC  = gcc
 CXXFLAGS = -std=c++20 -O2 -Wall -Wextra $(CPPFLAGS)
 CFLAGS   = -O2 -Wall -Wextra $(CPPFLAGS)
 LIBS = $(LDFLAGS) -lavif -lwebp -lm
 TARGET = colorpixels
 
-SRCS = colorpixels.cc
-OBJS = $(SRCS:.cc=.o)
+SRCFILES = main.cc lut.cc decoder.cc process.cc
+OBJS = $(SRCFILES:.cc=.o)
 
 .PHONY: all clean
 
 all: $(TARGET)
 
-# build target from objects
 $(TARGET): $(OBJS)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LIBS)
 
-# explicit dependency
-colorpixels.o: include/stb_image.h common.h
+# dependencies (headers used by multiple units)
+main.o: lut.h process.h
+lut.o: lut.h
+decoder.o: decoder.h
+process.o: process.h lut.h decoder.h
 
-# compile C++ source files
+# compile C++ source files to object files
 %.o: %.cc
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
