@@ -62,6 +62,7 @@
               libavif
               libwebp
               cli11
+              clang-tools
             ]
             ++ (with python3Packages; [
               scikit-image

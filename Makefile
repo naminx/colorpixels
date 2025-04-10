@@ -4,7 +4,7 @@ CFLAGS   = -O2 -Wall -Wextra $(CPPFLAGS)
 LIBS = $(LDFLAGS) -lavif -lwebp -lm
 TARGET = colorpixels
 
-SRCFILES = main.cc lut.cc decoder.cc process.cc
+SRCFILES = main.cc lut.cc decode.cc process.cc
 OBJS = $(SRCFILES:.cc=.o)
 
 .PHONY: all clean
@@ -15,10 +15,10 @@ $(TARGET): $(OBJS)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LIBS)
 
 # dependencies (headers used by multiple units)
-main.o: lut.h process.h
-lut.o: lut.h
-decoder.o: decoder.h
-process.o: process.h lut.h decoder.h
+main.o: lut.hh process.hh
+lut.o: lut.hh
+decode.o: decode.hh
+process.o: process.hh lut.hh decode.hh
 
 # compile C++ source files to object files
 %.o: %.cc
