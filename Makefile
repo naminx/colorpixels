@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -std=c++20 -O2 -Wall -Wextra $(CPPFLAGS)
+CXXFLAGS = -std=c++23 -O2 -Wall -Wextra $(CPPFLAGS)
 CFLAGS   = -O2 -Wall -Wextra $(CPPFLAGS)
 LIBS = $(LDFLAGS) -lavif -lwebp -lm
 TARGET = colorpixels
@@ -23,10 +23,6 @@ process.o: process.hh lut.hh decode.hh
 # compile C++ source files to object files
 %.o: %.cc
 	$(CXX) $(CXXFLAGS) -c $< -o $@
-
-# compile C source files
-%.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
 
 include/stb_image.h:
 	mkdir -p include

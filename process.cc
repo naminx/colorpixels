@@ -1,5 +1,5 @@
-#include <format>
 #include <cmath>
+#include <format>
 #include <sstream>
 
 #include "decode.hh"
@@ -11,8 +11,9 @@ void process_one(
     Result &entry,
     const std::array<std::array<uint16_t, BLOCKS>, BLOCKS> &gray_range_LUT)
 {
-  int w = 0, h = 0;
-  SmartPixelsPtr pix = decode_image(filename, w, h);
+  int w{0};
+  int h{0};
+  const SmartPixelsPtr pix{decode_image(filename, w, h)};
   std::stringstream ss;
   if (!pix) {
     ss << "ERROR decoding " << filename << "\n";
@@ -20,37 +21,42 @@ void process_one(
     entry.ready.store(true, std::memory_order_release);
     return;
   }
-  size_t N = size_t(w) * h, count = 0;
-  float max_c2 = 0.f; // stores maximal squared chroma
+  const size_t N{size_t(w) * h};
+  size_t count{0};
+  float maxc_square{0.f}; // stores maximal squared chroma
   for (size_t i = 0; i < N; ++i) {
-    uint8_t r = pix[3 * i], g = pix[3 * i + 1], b = pix[3 * i + 2];
-    auto mm = gray_range_LUT[r >> 2][g >> 2];
-    uint8_t minB = mm >> 8, maxB = mm & 0xff;
+    const uint8_t r{pix[3 * i]};
+    const uint8_t g{pix[3 * i + 1]};
+    const uint8_t b{pix[3 * i + 2]};
+    const auto mm{gray_range_LUT[r >> 2][g >> 2]};
+    const uint8_t minB{uint8_t(mm >> 8)};
+    const uint8_t maxB{uint8_t(mm & 0xff)};
     if (b < minB || b > maxB)
       ++count;
 
-    float sq = compute_chroma_square(r, g, b);
-    if (sq > max_c2)
-      max_c2 = sq;
+    const float sq{compute_chroma_square(r, g, b)};
+    if (sq > maxc_square)
+      maxc_square = sq;
   }
 
-  float ratio = N ? float(count) / N : 0.f;
+  const float ratio{N ? float(count) / N : 0.f};
 
-  uint8_t maxc_ui8 =
-      uint8_t(std::sqrt(max_c2) + 0.5f); // final max chroma (rounded int)
+  const float maxc{std::sqrt(maxc_square)};
 
   if (reverse) {
-    ss << std::format("{:.6g}", ratio);
     if (want_maxc)
-      ss << " " << int(maxc_ui8);
+      ss << std::format("{:.6f}", maxc);
+    else
+      ss << std::format("{:.6f}", ratio);
     if (print_fname)
       ss << " " << filename;
   } else {
     if (print_fname)
       ss << filename << " ";
-    ss << std::format("{:.6g}", ratio);
     if (want_maxc)
-      ss << " " << int(maxc_ui8);
+      ss << std::format("{:.6f}", maxc);
+    else
+      ss << std::format("{:.6f}", ratio);
   }
 
   ss << "\n";

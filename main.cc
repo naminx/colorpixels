@@ -1,5 +1,6 @@
 #include <CLI/CLI.hpp>
 #include <atomic>
+#include <iostream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -7,13 +8,16 @@
 #include "lut.hh"
 #include "process.hh"
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
   CLI::App app{"Lab chroma ratio detector"};
 
   std::vector<std::string> files;
-  float chroma_thr = 5.f;
-  bool sepia = false, rev = false, maxc = false;
-  int dumpThresh = 0;
+  float chroma_thr{5.f};
+  bool sepia{false};
+  bool rev{false};
+  bool maxc{false};
+  int dumpThresh{0};
   app.add_option("files", files, "Image files");
   app.add_option("-c,--chroma", chroma_thr, "Chroma threshold")
       ->check(CLI::PositiveNumber);
@@ -31,9 +35,9 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  auto gray_range_LUT = get_lookup_table(chroma_thr);
+  auto gray_range_LUT{get_lookup_table(chroma_thr)};
 
-  bool print_names = files.size() > 1;
+  bool print_names{files.size() > 1};
 
   std::vector<Result> res(files.size());
   std::vector<std::thread> threads;

@@ -20,8 +20,9 @@ FileType detect_type(const std::vector<uint8_t> &header)
     if (!memcmp(header.data(), "RIFF", 4) &&
         !memcmp(header.data() + 8, "WEBP", 4))
       return FileType::WebP;
-    const uint8_t *p = header.data();
-    uint32_t box_size = (p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3];
+    const uint8_t *p{header.data()};
+    uint32_t box_size{(uint32_t(p[0]) << 24) | (p[1] << 16) | (p[2] << 8) |
+                      p[3]};
     if (box_size >= 16 && header.size() >= box_size) {
       if (!memcmp(p + 4, "ftyp", 4) && !memcmp(p + 8, "avif", 4))
         return FileType::AVIF;
@@ -33,16 +34,8 @@ FileType detect_type(const std::vector<uint8_t> &header)
 // Unique_ptr for avifDecoder
 using DecoderPtr = std::unique_ptr<avifDecoder, decltype(&avifDecoderDestroy)>;
 using ImagePtr = std::unique_ptr<avifImage, decltype(&avifImageDestroy)>;
-
-using AvifImagePtr = std::shared_ptr<avifRGBImage>;
-
-void avif_cleanup(avifRGBImage *p)
-{
-  if (p) {
-    avifRGBImageFreePixels(p);
-    delete p;
-  }
-}
+using AvifImagePtr =
+    std::unique_ptr<avifRGBImage, decltype(&avifRGBImageFreePixels)>;
 
 SmartPixelsPtr decode_avif(const std::vector<uint8_t> &buf, int &w, int &h)
 {
@@ -62,7 +55,7 @@ SmartPixelsPtr decode_avif(const std::vector<uint8_t> &buf, int &w, int &h)
   w = img->width;
   h = img->height;
 
-  auto rgb = AvifImagePtr(new avifRGBImage{}, avif_cleanup);
+  AvifImagePtr rgb{new avifRGBImage{}, avifRGBImageFreePixels};
   avifRGBImageSetDefaults(rgb.get(), img.get());
   rgb->format = AVIF_RGB_FORMAT_RGB;
   rgb->depth = 8;
@@ -74,19 +67,18 @@ SmartPixelsPtr decode_avif(const std::vector<uint8_t> &buf, int &w, int &h)
   if (avifImageYUVToRGB(img.get(), rgb.get()) != AVIF_RESULT_OK)
     return {};
 
-  return SmartPixelsPtr(reinterpret_cast<unsigned char *>(rgb->pixels),
-                        [rgb_copy = rgb](unsigned char *) {
-                          // last copy of shared_ptr calls avif_cleanup
-                        });
+  return SmartPixelsPtr(reinterpret_cast<uint8_t *>(rgb->pixels),
+                        [rgb_copy = std::move(rgb)](uint8_t *) {});
 }
 
 SmartPixelsPtr decode_webp(const std::vector<uint8_t> &buf, int &w, int &h)
 {
-  int ww = 0, hh = 0;
+  int ww{0};
+  int hh{0};
 
-  auto pixels = SmartPixelsPtr(reinterpret_cast<unsigned char *>(WebPDecodeRGB(
-                                   buf.data(), buf.size(), &ww, &hh)),
-                               [](unsigned char *p) { WebPFree(p); });
+  SmartPixelsPtr pixels{reinterpret_cast<uint8_t *>(
+                            WebPDecodeRGB(buf.data(), buf.size(), &ww, &hh)),
+                        [](uint8_t *p) { WebPFree(p); }};
 
   if (!pixels)
     return {};
@@ -96,12 +88,14 @@ SmartPixelsPtr decode_webp(const std::vector<uint8_t> &buf, int &w, int &h)
   return pixels;
 }
 
-SmartPixelsPtr decode_other(const std::string &fname, int &w, int &h)
+SmartPixelsPtr decode_other(const std::vector<uint8_t> &buf, int &w, int &h)
 {
-  int ww = 0, hh = 0;
+  int ww{0};
+  int hh{0};
 
-  auto pixels = SmartPixelsPtr(stbi_load(fname.c_str(), &ww, &hh, nullptr, 3),
-                               [](unsigned char *p) { stbi_image_free(p); });
+  SmartPixelsPtr pixels{
+      stbi_load_from_memory(buf.data(), buf.size(), &ww, &hh, nullptr, 3),
+      [](uint8_t *p) { stbi_image_free(p); }};
 
   if (!pixels)
     return {};
@@ -119,13 +113,13 @@ SmartPixelsPtr decode_image(std::string_view fname, int &width, int &height)
   if (!in)
     return {};
 
-  size_t sz = size_t(in.tellg());
+  size_t sz{size_t(in.tellg())};
   in.seekg(0);
   std::vector<uint8_t> buf(sz);
   if (!in.read((char *)buf.data(), sz))
     return {};
 
-  FileType tp = detect_type(buf);
+  FileType tp{detect_type(buf)};
   SmartPixelsPtr pixels;
 
   if (tp == FileType::AVIF) {
@@ -141,6 +135,6 @@ SmartPixelsPtr decode_image(std::string_view fname, int &width, int &height)
   }
 
   // fallback: try stb_image
-  pixels = decode_other(std::string(fname), width, height);
+  pixels = decode_other(buf, width, height);
   return pixels;
 }
