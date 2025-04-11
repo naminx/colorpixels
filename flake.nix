@@ -25,6 +25,7 @@
         nativeBuildInputs = with pkgs; [
           gcc
           cli11
+          gnumake
         ];
         buildInputs = with pkgs; [
           libavif
@@ -38,12 +39,7 @@
 
         buildPhase = ''
           runHook preBuild
-          ${pkgs.gcc}/bin/g++ -std=c++20 -O2 -Wall -Wextra \
-            -Iinclude \
-            -I${pkgs.libavif}/include -I${pkgs.libwebp}/include -I${pkgs.cli11}/include \
-            colorpixels.cc -o colorpixels \
-            -L${pkgs.libavif.out}/lib -L${pkgs.libwebp.out}/lib \
-            -lavif -lwebp -lm
+          make
           runHook postBuild
         '';
 
