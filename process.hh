@@ -5,8 +5,8 @@
 #include "lut.hh"
 
 struct Result {
-  std::string output;
-  std::atomic<bool> ready{false};
+    std::string output;
+    std::atomic<bool> ready{false};
 };
 
 void process_one(

@@ -1,6 +1,5 @@
 CXX = g++
-CXXFLAGS = -std=c++23 -O2 -Wall -Wextra $(CPPFLAGS)
-CFLAGS   = -O2 -Wall -Wextra $(CPPFLAGS)
+CXXFLAGS = -std=c++20 -O3 -Wall -Wextra $(CPPFLAGS)
 LIBS = $(LDFLAGS) -lavif -lwebp -lm
 TARGET = colorpixels
 
