@@ -1,65 +1,104 @@
+#include "process.hh"
+
 #include <cmath>
-#include <format>
-#include <sstream>
+#include <format>  // WHY: Modern C++ way for type-safe text formatting.
+#include <sstream> // WHY: Convenient for building the output string incrementally.
 
 #include "decode.hh"
 #include "lut.hh"
-#include "process.hh"
 
-void process_one(
-    const std::string &filename, bool reverse, bool want_maxc, bool print_fname,
-    Result &entry,
-    const std::array<std::array<uint16_t, BLOCKS>, BLOCKS> &gray_range_LUT)
+// Processes a single image file to determine color ratio or max chroma.
+void process_image_file(const std::string &filename, bool reverse_output_order, bool report_max_chroma, bool print_filename,
+                        processing_result &result_entry, const chroma_lut_t &chroma_check_lut)
 {
-    int w{0};
-    int h{0};
-    const SmartPixelsPtr pix{decode_image(filename, w, h)};
-    std::stringstream ss;
-    if (!pix) {
-        ss << "ERROR decoding " << filename << "\n";
-        entry.output = ss.str();
-        entry.ready.store(true, std::memory_order_release);
+    int image_width{0};
+    int image_height{0};
+
+    // --- Decode Image ---
+    // WHY unique_ptr (smart_pixels_ptr)? Manages pixel buffer lifetime automatically (RAII).
+    const smart_pixels_ptr pixels{decode_image(filename, image_width, image_height)};
+
+    // Prepare output stream for results or errors.
+    std::stringstream output_stream;
+
+    // WHY check pixels? Decoding can fail; handle gracefully.
+    if (!pixels) {
+        output_stream << "ERROR decoding " << filename << "\n";
+        result_entry.output = output_stream.str();
+        // WHY atomic store? Signal main thread that this result is ready (with error).
+        // std::memory_order_release ensures preceding writes (like output string) are visible
+        // to the acquiring thread.
+        result_entry.is_ready.store(true, std::memory_order_release);
         return;
     }
-    const size_t N{size_t(w) * h};
-    size_t count{0};
-    float maxc_square{0.f}; // stores maximal squared chroma
-    for (size_t i = 0; i < N; ++i) {
-        const uint8_t r{pix[3 * i]};
-        const uint8_t g{pix[3 * i + 1]};
-        const uint8_t b{pix[3 * i + 2]};
-        const auto mm{gray_range_LUT[r >> 2][g >> 2]};
-        const uint8_t minB{uint8_t(mm >> 8)};
-        const uint8_t maxB{uint8_t(mm & 0xff)};
-        if (b < minB || b > maxB)
-            ++count;
 
-        const float sq{compute_chroma_square(r, g, b)};
-        if (sq > maxc_square)
-            maxc_square = sq;
+    // --- Analyze Pixels ---
+    const size_t total_pixels{static_cast<size_t>(image_width) * image_height};
+    size_t colored_pixel_count{0};
+    // WHY float? Chroma calculation involves floating point.
+    // WHY squared? Avoids sqrt in the loop for performance; compare threshold squared later.
+    float max_chroma_squared{0.f};
+
+    for (size_t i = 0; i < total_pixels; ++i) {
+        // Assuming RGB layout: R=pix[3*i], G=pix[3*i+1], B=pix[3*i+2]
+        const uint8_t r{pixels[3 * i + 0]};
+        const uint8_t g{pixels[3 * i + 1]};
+        const uint8_t b{pixels[3 * i + 2]};
+
+        // --- Chroma Check using LUT ---
+        // WHY bit shifts (>> 2)? Divides R and G by 4 to get index into 64x64 LUT.
+        // This effectively groups 4x4 blocks of R and G values.
+        const uint16_t min_max_b_packed{chroma_check_lut[r >> 2][g >> 2]};
+        // WHY bit shifts and masking? Extracts the precomputed min/max B values
+        // packed into the uint16_t for the given R,G block.
+        const uint8_t min_b_for_gray{static_cast<uint8_t>(min_max_b_packed >> 8)};   // High byte
+        const uint8_t max_b_for_gray{static_cast<uint8_t>(min_max_b_packed & 0xff)}; // Low byte
+
+        // WHY check range? If B is outside the precomputed [min, max] range for this R,G block,
+        // the pixel's chroma MUST exceed the threshold used to generate the LUT. This is the
+        // core optimization - avoids expensive chroma calculation for most pixels.
+        if (b < min_b_for_gray || b > max_b_for_gray) {
+            colored_pixel_count++;
+        }
+
+        // --- Max Chroma Tracking (if needed) ---
+        // WHY compute chroma separately? Only needed if max chroma output is requested.
+        if (report_max_chroma) {
+            // WHY squared? Avoids sqrt until the very end for performance.
+            const float current_chroma_squared = compute_chroma_squared(r, g, b);
+            // WHY compare squared? Faster than comparing sqrt(value).
+            if (current_chroma_squared > max_chroma_squared) {
+                max_chroma_squared = current_chroma_squared;
+            }
+        }
     }
 
-    const float ratio{N ? float(count) / N : 0.f};
+    // --- Format Output ---
+    // WHY check total_pixels? Avoid division by zero for empty/invalid images.
+    const float color_ratio{total_pixels ? static_cast<float>(colored_pixel_count) / total_pixels : 0.f};
+    // WHY sqrt here? Only calculate the actual max chroma value once at the end if needed.
+    const float max_chroma{std::sqrt(max_chroma_squared)};
 
-    const float maxc{std::sqrt(maxc_square)};
-
-    if (reverse) {
-        if (want_maxc)
-            ss << std::format("{:.6f}", maxc);
+    // Format output string based on command line flags.
+    if (reverse_output_order) {
+        if (report_max_chroma)
+            output_stream << std::format("{:.6f}", max_chroma); // WHY .6f? Common precision for ratios/floats.
         else
-            ss << std::format("{:.6f}", ratio);
-        if (print_fname)
-            ss << " " << filename;
+            output_stream << std::format("{:.6f}", color_ratio);
+        if (print_filename)
+            output_stream << " " << filename;
     } else {
-        if (print_fname)
-            ss << filename << " ";
-        if (want_maxc)
-            ss << std::format("{:.6f}", maxc);
+        if (print_filename)
+            output_stream << filename << " ";
+        if (report_max_chroma)
+            output_stream << std::format("{:.6f}", max_chroma);
         else
-            ss << std::format("{:.6f}", ratio);
+            output_stream << std::format("{:.6f}", color_ratio);
     }
+    output_stream << "\n"; // Ensure newline termination.
 
-    ss << "\n";
-    entry.output = ss.str();
-    entry.ready.store(true, std::memory_order_release);
+    // --- Signal Completion ---
+    result_entry.output = output_stream.str();
+    // WHY atomic store? Signal main thread that this result is ready (successfully).
+    result_entry.is_ready.store(true, std::memory_order_release);
 }
