@@ -149,48 +149,35 @@ int main(int argc, char **argv)
         processing_threads.emplace_back(process_image_file, image_filenames[i], file_names_only, output_max_chroma, greater_than,
                                         less_than, print_filenames, std::ref(results[i]), std::cref(chroma_check_lut));
     }
-
     // --- Collect and Print Results ---
-    // WHY loop through results? Ensure results are printed in the original file order.
-    /* for (size_t i = 0; i < results.size(); ++i) {
-        // WHY loop with yield? Simple busy-wait for thread completion. std::memory_order_acquire ensures
-        // visibility of writes done by the processing thread before the release store.
-        while (!results[i].is_ready.load(std::memory_order_acquire)) {
-            std::this_thread::yield(); // WHY yield? Avoids pegging CPU core while waiting.
-        }
-        // Output is pre-formatted by the processing thread.
-        std::cout << results[i].output;
-    } */
-
-    // --- Collect and Print Results ---
-    for (auto &t : processing_threads) {
-        if (t.joinable())
-            t.join();
-    }
-
     if (!sort_results) {
-        for (auto &res : results) {
-            while (!res.is_ready.load(std::memory_order_acquire)) {
+        // Print results as they become available
+        for (size_t i = 0; i < results.size(); ++i) {
+            while (!results[i].is_ready.load(std::memory_order_acquire)) {
                 std::this_thread::yield();
             }
-            std::cout << res.output;
+            std::cout << results[i].output;
+        }
+
+        // Join threads after results are printed
+        for (auto &t : processing_threads) {
+            if (t.joinable())
+                t.join();
         }
     } else {
-        std::vector<std::reference_wrapper<const processing_result>> sorted_refs(results.begin(), results.end());
+        // Join all threads first to ensure all results are ready
+        for (auto &t : processing_threads) {
+            if (t.joinable())
+                t.join();
+        }
 
+        // Sort by value descending
+        std::vector<std::reference_wrapper<const processing_result>> sorted_refs(results.begin(), results.end());
         std::stable_sort(sorted_refs.begin(), sorted_refs.end(),
                          [](const processing_result &a, const processing_result &b) { return a.value > b.value; });
 
         for (const auto &res_ref : sorted_refs) {
             std::cout << res_ref.get().output;
-        }
-    }
-
-    // --- Cleanup ---
-    // WHY join threads? Ensures all threads complete execution before main exits.
-    for (auto &t : processing_threads) {
-        if (t.joinable()) { // WHY check joinable? Avoids crash if thread wasn't started properly.
-            t.join();
         }
     }
 
