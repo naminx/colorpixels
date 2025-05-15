@@ -8,7 +8,8 @@
 #include "lut.hh"
 
 // Processes a single image file to determine color ratio or max chroma.
-void process_image_file(const std::string &filename, bool reverse_output_order, bool report_max_chroma, bool print_filename,
+void process_image_file(const std::string &filename, bool file_names_only, bool report_max_chroma,
+                        std::optional<float> greater_than, std::optional<float> less_than, bool print_filename,
                         processing_result &result_entry, const chroma_lut_t &chroma_check_lut)
 {
     int image_width{0};
@@ -75,27 +76,27 @@ void process_image_file(const std::string &filename, bool reverse_output_order, 
 
     // --- Format Output ---
     // WHY check total_pixels? Avoid division by zero for empty/invalid images.
-    const float color_ratio{total_pixels ? static_cast<float>(colored_pixel_count) / total_pixels * 100.0f : 0.f};
+    // const float color_ratio{
+    //     !report_max_chroma ? (total_pixels ? static_cast<float>(colored_pixel_count) / total_pixels * 100.0f : 0.f) : 0.f};
     // WHY sqrt here? Only calculate the actual max chroma value once at the end if needed.
-    const float max_chroma{std::sqrt(max_chroma_squared)};
+    // const float max_chroma{report_max_chroma ? std::sqrt(max_chroma_squared) : 0.f};
 
-    // Format output string based on command line flags.
-    if (reverse_output_order) {
-        if (report_max_chroma)
-            output_stream << std::format("{:.3f}", max_chroma); // WHY .6f? Common precision for ratios/floats.
-        else
-            output_stream << std::format("{:.3f}", color_ratio);
-        if (print_filename)
-            output_stream << " " << filename;
-    } else {
-        if (print_filename)
-            output_stream << filename << " ";
-        if (report_max_chroma)
-            output_stream << std::format("{:.3f}", max_chroma);
-        else
-            output_stream << std::format("{:.3f}", color_ratio);
+    const float report_value{report_max_chroma
+                                 ? std::sqrt(max_chroma_squared)
+                                 : (total_pixels ? static_cast<float>(colored_pixel_count) / total_pixels * 100.0f : 0.f)};
+    result_entry.value = report_value;
+
+    // Print output only if
+    if ((!greater_than || report_value > *greater_than) && (!less_than || report_value < *less_than)) {
+        if (print_filename || file_names_only)
+            output_stream << filename;
+        if (!file_names_only) {
+            if (print_filename || file_names_only)
+                output_stream << " ";
+            output_stream << std::format("{:.3f}", report_value);
+        }
+        output_stream << "\n"; // Ensure newline termination.
     }
-    output_stream << "\n"; // Ensure newline termination.
 
     // --- Signal Completion ---
     result_entry.output = output_stream.str();

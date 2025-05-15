@@ -1,0 +1,8 @@
+BasedOnStyle: LLVM
+IndentWidth: 4
+BreakBeforeBraces: Custom
+BraceWrapping: {
+  AfterFunction: true
+}
+SpacesInContainerLiterals: true
+ColumnLimit: 132

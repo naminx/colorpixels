@@ -1,7 +1,7 @@
 CXX = g++
 CXXFLAGS = -std=c++23 -O3 -Wall -Wextra $(CPPFLAGS)
 LIBS = $(LDFLAGS) -lavif -lwebp -lm
-TARGET = colorpixels
+TARGET = cpix
 
 SRCFILES = main.cc lut.cc decode.cc process.cc
 OBJS = $(SRCFILES:.cc=.o)

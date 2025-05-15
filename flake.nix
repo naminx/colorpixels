@@ -1,7 +1,7 @@
 {
   description = "Tell the ratio of color pixels / total pixels";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs";
+  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-24.11";
 
   outputs =
     { self, nixpkgs }:
@@ -19,7 +19,7 @@
     {
       packages.${system}.default = pkgs.stdenv.mkDerivation {
         pname = "colorpixels";
-        version = "1.0";
+        version = "1.1";
         src = ./.;
 
         nativeBuildInputs = with pkgs; [
@@ -45,7 +45,7 @@
 
         installPhase = ''
           mkdir -p $out/bin
-          cp colorpixels $out/bin/
+          cp cpix $out/bin/
         '';
       };
 

@@ -1,6 +1,7 @@
 #include <CLI/CLI.hpp> // WHY: External library for easy command-line argument parsing.
 #include <atomic>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <thread> // WHY: For processing multiple images concurrently.
 #include <vector>
@@ -22,9 +23,12 @@ int main(int argc, char **argv)
     // WHY float? Chroma threshold can be non-integer. Default 5 is common for distinguishing gray.
     float chroma_threshold{5.f};
     bool use_sepia_preset{false};  // WHY bool? Simple flag for a specific preset.
-    bool reverse_output{false};    // WHY bool? Flag to change output column order.
+    bool file_names_only{false};   // WHY bool? Flag to change output column order.
     bool output_max_chroma{false}; // WHY bool? Flag to output max chroma instead of ratio.
     int dump_lut_at_threshold{0};  // WHY int? Threshold for dumping is integer; 0 means disabled.
+    std::optional<float> greater_than{std::nullopt};
+    std::optional<float> less_than{std::nullopt};
+    bool sort_results{false};
 
     // --- Positional Arguments ---
     app_parser.add_option("files", image_filenames, "Image files to process (required unless using --dump-lut)");
@@ -34,16 +38,24 @@ int main(int argc, char **argv)
     app_parser.add_option("-t,--threshold", chroma_threshold, "Chroma threshold for color detection (default: 5.0)")
         ->check(CLI::PositiveNumber); // WHY check? Ensure threshold is physically meaningful.
 
+    app_parser
+        .add_option("-g,--greater-than", greater_than,
+                    "List images with color ratio greater than this value (default: none)")
+        ->check(CLI::PositiveNumber); // WHY check? Ensure threshold is physically meaningful.
+    app_parser.add_option("-l,--less-than", less_than, "List images with color ratio less than this value (default: none)")
+        ->check(CLI::PositiveNumber); // WHY check? Ensure threshold is physically meaningful.
+
     // Renamed from -t,--lookup-table to avoid conflict with --threshold and be more descriptive.
-    app_parser.add_option("-d,--dump-lut", dump_lut_at_threshold, "Dump precomputed LUT for a threshold and exit")
-        ->default_val(0); // Explicitly show 0 means disabled.
+    app_parser.add_option("-d,--dump-lut", dump_lut_at_threshold, "Dump precomputed LUT for a threshold and exit (default: 0)");
 
     // --- Flags ---
     app_parser.add_flag("-s,--sepia", use_sepia_preset, "Use preset threshold=13 for sepia detection (overrides -t)");
 
-    app_parser.add_flag("-r,--reverse-column", reverse_output, "Output value column (ratio/max_chroma) first");
+    app_parser.add_flag("-f,--file-names-only", file_names_only, "Output only file names");
 
     app_parser.add_flag("-m,--max-chroma", output_max_chroma, "Output max chroma value instead of color ratio");
+
+    app_parser.add_flag("-r,--reverse-sort", sort_results, "Sort results by value descending (stable sort)");
 
     // --- Standard Flags ---
     // WHY add_flag_function? Provides a way to execute code (print version, exit) when flag is detected.
@@ -134,13 +146,13 @@ int main(int argc, char **argv)
         // WHY emplace_back? Efficiently constructs thread in place.
         // WHY std::ref(results[i])? Pass result slot by reference to allow modification by thread.
         // WHY pass LUT by const ref? Avoid copying the large LUT for each thread.
-        processing_threads.emplace_back(process_image_file, image_filenames[i], reverse_output, output_max_chroma, print_filenames,
-                                        std::ref(results[i]), std::cref(chroma_check_lut));
+        processing_threads.emplace_back(process_image_file, image_filenames[i], file_names_only, output_max_chroma, greater_than,
+                                        less_than, print_filenames, std::ref(results[i]), std::cref(chroma_check_lut));
     }
 
     // --- Collect and Print Results ---
     // WHY loop through results? Ensure results are printed in the original file order.
-    for (size_t i = 0; i < results.size(); ++i) {
+    /* for (size_t i = 0; i < results.size(); ++i) {
         // WHY loop with yield? Simple busy-wait for thread completion. std::memory_order_acquire ensures
         // visibility of writes done by the processing thread before the release store.
         while (!results[i].is_ready.load(std::memory_order_acquire)) {
@@ -148,6 +160,30 @@ int main(int argc, char **argv)
         }
         // Output is pre-formatted by the processing thread.
         std::cout << results[i].output;
+    } */
+
+    // --- Collect and Print Results ---
+    for (auto &t : processing_threads) {
+        if (t.joinable())
+            t.join();
+    }
+
+    if (!sort_results) {
+        for (auto &res : results) {
+            while (!res.is_ready.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            std::cout << res.output;
+        }
+    } else {
+        std::vector<std::reference_wrapper<const processing_result>> sorted_refs(results.begin(), results.end());
+
+        std::stable_sort(sorted_refs.begin(), sorted_refs.end(),
+                         [](const processing_result &a, const processing_result &b) { return a.value > b.value; });
+
+        for (const auto &res_ref : sorted_refs) {
+            std::cout << res_ref.get().output;
+        }
     }
 
     // --- Cleanup ---

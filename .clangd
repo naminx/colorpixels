@@ -1,0 +1,20 @@
+CompileFlags:
+  Add:
+    - "-std=c++23"
+    - "-isystem/nix/store/x3w82h37p8ynii9g0ma9awv8cqdhx5gv-libavif-1.1.1/include"
+    - "-isystem/nix/store/mbgg6cf9775i9bhcd7bby739ianvhs9s-dav1d-1.5.0-dev/include"
+    - "-isystem/nix/store/y5ymw6y49bzbrq2zj31hwhlm5c9z2rs0-libaom-3.10.0-dev/include"
+    - "-isystem/nix/store/69irwb414l886l476647y465909b5mc3-libvmaf-3.0.0-dev/include"
+    - "-isystem/nix/store/w8r9126plim0bwfvbg74gvgz7khq0767-libyuv-1787/include"
+    - "-isystem/nix/store/fq649zv05hfvpyyi33cnwzrjkyl7zdin-libwebp-1.4.0/include"
+    - "-isystem/nix/store/3mdqclqmnah5jx07my6r7y7fzh2xdzjb-cli11-2.3.2/include"
+    - "-isystem/nix/store/99hl269v1igvjbp1znfk5jcarhzgy822-python3-3.12.8/include"
+    - "-isystem/nix/store/vl4zvn7ir6y4kzr99709xayck0mal8pn-gcc-13.3.0/include/c++/13.3.0"
+    - "-isystem/nix/store/vl4zvn7ir6y4kzr99709xayck0mal8pn-gcc-13.3.0/include/c++/13.3.0/x86_64-unknown-linux-gnu"
+    - "-isystem/nix/store/vl4zvn7ir6y4kzr99709xayck0mal8pn-gcc-13.3.0/include/c++/13.3.0/backward"
+    - "-isystem/nix/store/vl4zvn7ir6y4kzr99709xayck0mal8pn-gcc-13.3.0/lib/gcc/x86_64-unknown-linux-gnu/13.3.0/include"
+    - "-isystem/nix/store/vl4zvn7ir6y4kzr99709xayck0mal8pn-gcc-13.3.0/include"
+    - "-isystem/nix/store/vl4zvn7ir6y4kzr99709xayck0mal8pn-gcc-13.3.0/lib/gcc/x86_64-unknown-linux-gnu/13.3.0/include-fixed"
+    - "-isystem/nix/store/rvdy4vnkwfk65p104q1bdpslgrjl7yp4-glibc-2.40-66-dev/include"
+    - "-isystem# 1 "/nix/store/rvdy4vnkwfk65p104q1bdpslgrjl7yp4-glibc-2.40-66-dev/include/stdc-predef.h" 1 3 4"
+  CompilationDatabase: build
